@@ -91,6 +91,7 @@ static struct option longopts[] = {
 	{ "ignore-errors",  no_argument,       NULL,  1  },
 	{ "variant",        required_argument, NULL,  2  },
 	{ "logfile",        required_argument, NULL,  3  },
+	{ "remove-setup-app", no_argument,     NULL,  4  },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -157,6 +158,9 @@ static void usage(int argc, char* argv[], int err)
 	"                        errors (like a failed baseband update)\n" \
 	"                        WARNING: This might render the device unable to boot\n" \
 	"                        or only partially functioning. Use with caution.\n" \
+	"  --remove-setup-app    Remove Setup.app from the filesystem, useful for\n" \
+	"                        development devices. This requires the 'hfsplus'\n" \
+	"                        tool to be available in PATH.\n" \
 	"\n" \
 	"Homepage:    <" PACKAGE_URL ">\n" \
 	"Bug Reports: <" PACKAGE_BUGREPORT ">\n",
@@ -1183,6 +1187,19 @@ int idevicerestore_start(struct idevicerestore_client_t* client)
 		}
 	}
 
+	if ((client->flags & FLAG_REMOVE_SETUP_APP) && client->filesystem) {
+		logger(LL_INFO, "Trying to remove Setup.app from filesystem...\n");
+		char* cmd = NULL;
+		if (asprintf(&cmd, "hfsplus \"%s\" rm \"/Applications/Setup.app\" > /dev/null 2>&1", client->filesystem) > 0) {
+			if (system(cmd) == 0) {
+				logger(LL_INFO, "Successfully removed Setup.app.\n");
+			} else {
+				logger(LL_WARNING, "Could not remove Setup.app. Please make sure the 'hfsplus' tool is installed and in your PATH.\n");
+			}
+			free(cmd);
+		}
+	}
+
 	idevicerestore_progress(client, RESTORE_STEP_PREPARE, 0.2);
 
 	/* retrieve shsh blobs if required */
@@ -1976,6 +1993,10 @@ int main(int argc, char* argv[])
 				return EXIT_FAILURE;
 			}
 			logfile = optarg;
+			break;
+
+		case 4:
+			client->flags |= FLAG_REMOVE_SETUP_APP;
 			break;
 
 		default:
