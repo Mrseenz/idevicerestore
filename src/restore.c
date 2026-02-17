@@ -5471,6 +5471,9 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 		// FIXME: does this have any effect actually?
 		plist_dict_set_item(opts, "UpdateBaseband", plist_new_bool(1));
 		plist_dict_set_item(opts, "InstallDiags", plist_new_bool(0));
+		/* Force full data wipe and bypass setup assistant where supported by restore daemon. */
+		plist_dict_set_item(opts, "DisableUserAuthentication", plist_new_bool(1));
+		plist_dict_set_item(opts, "SkipSetup", plist_new_bool(1));
 		if (client->recovery_variant) {
 			plist_dict_set_item(opts, "InstallRecoveryOS", plist_new_bool(1));
 			plist_dict_set_item(opts, "RecoveryOSBundlePath", plist_new_string("/tmp/Per2.tmp"));
@@ -5512,6 +5515,7 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 		//plist_dict_set_item(opts, "UserLocale", plist_new_string("en_US"));
 		/* this is mandatory on iOS 7+ to allow restore from normal mode */
 		plist_dict_set_item(opts, "PersonalizedDuringPreflight", plist_new_bool(1));
+		plist_dict_set_item(opts, "AuthInstallRestoreBehavior", plist_new_string(client->flags & FLAG_ERASE ? "Erase": "Update"));
 	}
 
 	// Added for iOS 18.0 and macOS 15.0
