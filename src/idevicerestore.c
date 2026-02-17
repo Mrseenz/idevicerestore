@@ -359,6 +359,18 @@ int idevicerestore_start(struct idevicerestore_client_t* client)
 		return -1;
 	}
 
+	if (!(client->flags & FLAG_PWN) && !(client->flags & FLAG_SHSHONLY)) {
+		if (!(client->flags & FLAG_ERASE)) {
+			logger(LL_INFO, "Enforcing erase restore mode to ensure a complete device wipe.\n");
+		}
+		client->flags |= FLAG_ERASE;
+		if (client->restore_variant && !strstr(client->restore_variant, RESTORE_VARIANT_ERASE_INSTALL)) {
+			logger(LL_WARNING, "Restore variant '%s' does not request an erase install. Forcing '%s'.\n", client->restore_variant, RESTORE_VARIANT_ERASE_INSTALL);
+			free(client->restore_variant);
+			client->restore_variant = strdup(RESTORE_VARIANT_ERASE_INSTALL);
+		}
+	}
+
 	if (!client->ipsw && !(client->flags & FLAG_PWN) && !(client->flags & FLAG_LATEST)) {
 		logger(LL_ERROR, "no ipsw file given\n");
 		return -1;
