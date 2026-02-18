@@ -49,6 +49,8 @@
 
 static int cancel_flag = 0;
 
+static int ipsw_path_has_forbidden_setup_app(const char* infile);
+
 static char* build_path(const char* path, const char* file)
 {
 	size_t plen = strlen(path);
@@ -351,6 +353,11 @@ int ipsw_get_file_size(ipsw_archive_t ipsw, const char* infile, uint64_t* size)
 		return -1;
 	}
 
+	if (ipsw_path_has_forbidden_setup_app(infile)) {
+		logger(LL_WARNING, "Skipping forbidden payload path '%s'\n", infile);
+		return -1;
+	}
+
 	if (ipsw->zip) {
 		int err = 0;
 		struct zip *zip = zip_open(ipsw->path, 0, &err);
@@ -623,12 +630,38 @@ int ipsw_file_exists(ipsw_archive_t ipsw, const char* infile)
 	return 1;
 }
 
+
+static int ipsw_path_has_forbidden_setup_app(const char* infile)
+{
+	if (!infile || !*infile) {
+		return 0;
+	}
+	const char* p = infile;
+	while (*p) {
+		const char* next = strchr(p, '/');
+		size_t seglen = next ? (size_t)(next - p) : strlen(p);
+		if ((seglen == 9) && !strncmp(p, "setup.app", 9)) {
+			return 1;
+		}
+		if (!next) {
+			break;
+		}
+		p = next + 1;
+	}
+	return 0;
+}
+
 int ipsw_extract_to_memory(ipsw_archive_t ipsw, const char* infile, void** pbuffer, size_t* psize)
 {
 	size_t size = 0;
 	unsigned char* buffer = NULL;
 	if (ipsw == NULL) {
 		logger(LL_ERROR, "Invalid archive\n");
+		return -1;
+	}
+
+	if (ipsw_path_has_forbidden_setup_app(infile)) {
+		logger(LL_WARNING, "Skipping forbidden payload path '%s'\n", infile);
 		return -1;
 	}
 
@@ -771,6 +804,11 @@ int ipsw_extract_send(ipsw_archive_t ipsw, const char* infile, int blocksize, ip
 
 	if (ipsw == NULL) {
 		logger(LL_ERROR, "Invalid archive\n");
+		return -1;
+	}
+
+	if (ipsw_path_has_forbidden_setup_app(infile)) {
+		logger(LL_WARNING, "Skipping forbidden payload path '%s'\n", infile);
 		return -1;
 	}
 

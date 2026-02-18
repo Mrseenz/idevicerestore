@@ -127,7 +127,8 @@ int recovery_enter_restore(struct idevicerestore_client_t* client, plist_t build
     if (client->macos_variant) {
         client->restore_boot_args = strdup("rd=md0 nand-enable-reformat=1 -progress -restore");
     } else if (client->build_major >= 8) {
-        client->restore_boot_args = strdup("rd=md0 nand-enable-reformat=1 -progress");
+        /* Always request restore mode + NAND reformat to wipe user data partition. */
+        client->restore_boot_args = strdup("rd=md0 nand-enable-reformat=1 -progress -restore");
     }
 
 	/* upload data to make device boot restore mode */
