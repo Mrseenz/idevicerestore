@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <math.h>
+#include <time.h>
 #include <libimobiledevice/restore.h>
 #include <libimobiledevice/property_list_service.h>
 #include <libimobiledevice-glue/thread.h>
@@ -1262,6 +1263,57 @@ static size_t _curl_header_callback(char* buffer, size_t size, size_t nitems, vo
 	return len;
 }
 
+static void restore_save_streamed_image_key_artifacts(struct idevicerestore_client_t* client, const char* request_url, const char* request_body, size_t request_body_size, const char* response_body, size_t response_body_size, long http_response)
+{
+	char ts[32];
+	time_t now = time(NULL);
+	struct tm tmv;
+	localtime_r(&now, &tmv);
+	strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S%z", &tmv);
+
+	const char* base = (client && client->cache_dir) ? client->cache_dir : ".";
+	char json_path[1024];
+	char log_path[1024];
+	snprintf(json_path, sizeof(json_path), "%s/%s", base, "dmg_decryption_keys.json");
+	snprintf(log_path, sizeof(log_path), "%s/%s", base, "dmg_decryption_keys.log");
+
+	plist_t entry = plist_new_dict();
+	plist_dict_set_item(entry, "timestamp", plist_new_string(ts));
+	plist_dict_set_item(entry, "request_url", plist_new_string(request_url ? request_url : ""));
+	plist_dict_set_item(entry, "http_status", plist_new_uint((uint64_t)((http_response < 0) ? 0 : http_response)));
+	plist_dict_set_item(entry, "request_body", plist_new_data(request_body ? request_body : "", request_body ? request_body_size : 0));
+	plist_dict_set_item(entry, "response_body", plist_new_data(response_body ? response_body : "", response_body ? response_body_size : 0));
+
+	char* json_buf = NULL;
+	uint32_t json_len = 0;
+	plist_to_json(entry, &json_buf, &json_len, 1);
+	plist_free(entry);
+
+	if (json_buf) {
+		FILE* jf = fopen(json_path, "a");
+		if (jf) {
+			fwrite(json_buf, 1, json_len, jf);
+			fputc('\n', jf);
+			fclose(jf);
+		} else {
+			logger(LL_WARNING, "Could not open %s for writing\n", json_path);
+		}
+		free(json_buf);
+	}
+
+	FILE* lf = fopen(log_path, "a");
+	if (lf) {
+		fprintf(lf, "[%s] URL=%s STATUS=%ld request_bytes=%zu response_bytes=%zu\n", ts, request_url ? request_url : "", http_response, request_body_size, response_body_size);
+		if (response_body && response_body_size > 0) {
+			fprintf(lf, "ResponseBody=%.*s\n", (int)response_body_size, response_body);
+		}
+		fprintf(lf, "---\n");
+		fclose(lf);
+	} else {
+		logger(LL_WARNING, "Could not open %s for writing\n", log_path);
+	}
+}
+
 int restore_send_url_asset(struct idevicerestore_client_t* client, plist_t message)
 {
 	plist_t arguments = plist_dict_get_item(message, "Arguments");
@@ -1327,6 +1379,7 @@ int restore_send_url_asset(struct idevicerestore_client_t* client, plist_t messa
 	plist_dict_set_item(dict, "ResponseHeaders", response_headers);
 	plist_dict_set_item(dict, "ResponseStatus", plist_new_uint(http_response));
 
+	free(response->content);
 	free(response);
 
 	restore_service_client_t service = _restore_get_service_client_for_data_request(client, message);
@@ -1393,7 +1446,7 @@ int restore_send_streamed_image_decryption_key(struct idevicerestore_client_t* c
 		plist_dict_next_item(headers, iter, &key, &node);
 		if (!node) break;
 		snprintf(header_tmp, sizeof(header_tmp), "%s: %s", key, plist_get_string_ptr(node, NULL));
-		curl_slist_append(header, header_tmp);
+		header = curl_slist_append(header, header_tmp);
 	} while (node);
 	plist_mem_free(iter);
 
@@ -1431,6 +1484,9 @@ int restore_send_streamed_image_decryption_key(struct idevicerestore_client_t* c
 	long http_response = 0;
 	curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &http_response);
 
+	restore_save_streamed_image_key_artifacts(client, request_url, request_body, request_body_size, response->content, response->length, http_response);
+	logger(LL_INFO, "Saved streamed image decryption key exchange artifacts to local JSON and log files.\n");
+
 	curl_easy_cleanup(handle);
 
 	plist_t dict = plist_new_dict();
@@ -1439,6 +1495,7 @@ int restore_send_streamed_image_decryption_key(struct idevicerestore_client_t* c
 	plist_dict_set_item(dict, "ResponseHeaders", response_headers);
 	plist_dict_set_item(dict, "ResponseStatus", plist_new_uint(http_response));
 
+	free(response->content);
 	free(response);
 
 	restore_service_client_t service = _restore_get_service_client_for_data_request(client, message);
@@ -5414,7 +5471,7 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 			plist_dict_set_item(opts, "AuthInstallRecoveryOSVariant", plist_new_string(macos_variant));
 			free(macos_variant);
 		}
-		plist_dict_set_item(opts, "AuthInstallRestoreBehavior", plist_new_string(client->flags & FLAG_ERASE ? "Erase": "Update"));
+		plist_dict_set_item(opts, "AuthInstallRestoreBehavior", plist_new_string("Erase"));
 		plist_dict_set_item(opts, "AutoBootDelay", plist_new_uint(0));
 		plist_dict_set_item(opts, "BasebandUpdaterOutputPath", plist_new_bool(1));
 		plist_dict_set_item(opts, "DisableUserAuthentication", plist_new_bool(1));
@@ -5515,7 +5572,7 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 		//plist_dict_set_item(opts, "UserLocale", plist_new_string("en_US"));
 		/* this is mandatory on iOS 7+ to allow restore from normal mode */
 		plist_dict_set_item(opts, "PersonalizedDuringPreflight", plist_new_bool(1));
-		plist_dict_set_item(opts, "AuthInstallRestoreBehavior", plist_new_string(client->flags & FLAG_ERASE ? "Erase": "Update"));
+		plist_dict_set_item(opts, "AuthInstallRestoreBehavior", plist_new_string("Erase"));
 	}
 
 	// Added for iOS 18.0 and macOS 15.0
